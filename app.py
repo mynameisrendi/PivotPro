@@ -5,11 +5,15 @@ import os
 class PivotTransformer:
     def __init__(self):
         self.data = None
+        self.last_loaded_file = None  # Track the last loaded file name
     
     def load_csv(self, filepath, delimiter=';'):
         """Load CSV file with specified delimiter"""
         try:
-            self.data = pd.read_csv(filepath, delimiter=delimiter)
+            # Use 'sep' parameter instead of 'delimiter' for pandas
+            self.data = pd.read_csv(filepath, sep=delimiter)
+            # Store the filename (without path and extension) for default naming
+            self.last_loaded_file = os.path.splitext(os.path.basename(filepath))[0]
             print(f"✓ Successfully loaded: {filepath}")
             print(f"  Shape: {self.data.shape}")
             print(f"  Columns: {list(self.data.columns)}")
@@ -25,20 +29,69 @@ class PivotTransformer:
             return None
         
         try:
+            # Print data info for debugging
+            print(f"  Columns in data: {list(self.data.columns)}")
+            print(f"  Data types: {self.data.dtypes.to_dict()}")
+            print(f"  Sample data:")
+            print(self.data.head(3).to_string(index=False))
+            
+            # Check if required columns exist
+            if project_col not in self.data.columns:
+                print(f"✗ Column '{project_col}' not found. Available columns: {list(self.data.columns)}")
+                return None
+            if designator_col not in self.data.columns:
+                print(f"✗ Column '{designator_col}' not found. Available columns: {list(self.data.columns)}")
+                return None
+            if value_col not in self.data.columns:
+                print(f"✗ Column '{value_col}' not found. Available columns: {list(self.data.columns)}")
+                return None
+            
+            # Clean the data - strip whitespace and handle data types
+            data_clean = self.data.copy()
+            data_clean[project_col] = data_clean[project_col].astype(str).str.strip()
+            data_clean[designator_col] = data_clean[designator_col].astype(str).str.strip()
+            
+            # Convert volume to numeric, handling any non-numeric values
+            data_clean[value_col] = pd.to_numeric(data_clean[value_col], errors='coerce')
+            
+            # Check for any NaN values after conversion
+            if data_clean[value_col].isna().any():
+                print("⚠ Warning: Some volume values couldn't be converted to numbers. Setting them to 0.")
+                data_clean[value_col] = data_clean[value_col].fillna(0)
+            
             # Create pivot table
-            pivoted = self.data.pivot(index=designator_col, columns=project_col, values=value_col)
+            pivoted = data_clean.pivot(index=designator_col, columns=project_col, values=value_col)
             
             # Reset index to make designator a column
             pivoted = pivoted.reset_index()
             
             # Fill NaN values with 0 if any
-            pivoted = pivoted.fillna(0).astype(int)
+            pivoted = pivoted.fillna(0)
+            
+            # Convert to int only if all values are whole numbers
+            try:
+                # Check if all values can be safely converted to int
+                numeric_columns = pivoted.select_dtypes(include=['float64', 'int64']).columns
+                for col in numeric_columns:
+                    if col != designator_col:
+                        pivoted[col] = pivoted[col].astype(int)
+            except:
+                print("⚠ Warning: Keeping values as float (some values have decimals)")
             
             print("✓ Successfully converted to column format")
             return pivoted
         
         except Exception as e:
             print(f"✗ Error during row-to-column transformation: {e}")
+            print("Debug info:")
+            if hasattr(self, 'data') and self.data is not None:
+                print(f"  Data shape: {self.data.shape}")
+                print(f"  Unique values in each column:")
+                for col in self.data.columns:
+                    unique_count = self.data[col].nunique()
+                    print(f"    {col}: {unique_count} unique values")
+                    if unique_count <= 10:
+                        print(f"      Values: {list(self.data[col].unique())}")
             return None
     
     def column_to_row_format(self, designator_col='designator'):
@@ -48,17 +101,42 @@ class PivotTransformer:
             return None
         
         try:
+            # Print data info for debugging
+            print(f"  Columns in data: {list(self.data.columns)}")
+            print(f"  Data shape: {self.data.shape}")
+            
+            # Check if designator column exists
+            if designator_col not in self.data.columns:
+                print(f"✗ Column '{designator_col}' not found. Available columns: {list(self.data.columns)}")
+                return None
+            
             # Get all columns except the designator column
             project_columns = [col for col in self.data.columns if col != designator_col]
             
+            if not project_columns:
+                print("✗ No project columns found for melting.")
+                return None
+            
+            print(f"  Found {len(project_columns)} project columns: {project_columns}")
+            
+            # Clean the data
+            data_clean = self.data.copy()
+            
             # Melt the dataframe
             melted = pd.melt(
-                self.data, 
+                data_clean, 
                 id_vars=[designator_col], 
                 value_vars=project_columns,
                 var_name='project', 
                 value_name='volume'
             )
+            
+            # Clean up the melted data
+            melted['project'] = melted['project'].astype(str).str.strip()
+            melted[designator_col] = melted[designator_col].astype(str).str.strip()
+            
+            # Convert volume to numeric
+            melted['volume'] = pd.to_numeric(melted['volume'], errors='coerce').fillna(0)
             
             # Remove rows with zero volume (optional)
             melted = melted[melted['volume'] != 0]
@@ -71,6 +149,11 @@ class PivotTransformer:
         
         except Exception as e:
             print(f"✗ Error during column-to-row transformation: {e}")
+            print("Debug info:")
+            if hasattr(self, 'data') and self.data is not None:
+                print(f"  Data shape: {self.data.shape}")
+                print(f"  Data columns: {list(self.data.columns)}")
+                print(f"  Data types: {self.data.dtypes.to_dict()}")
             return None
     
     def save_csv(self, data, output_path, delimiter=';'):
@@ -80,7 +163,38 @@ class PivotTransformer:
             return False
         
         try:
-            data.to_csv(output_path, delimiter=delimiter, index=False)
+            # Handle empty or directory-only paths
+            output_path = output_path.strip()
+            
+            # If path ends with / or is empty, it's a directory path
+            if output_path.endswith('/') or output_path.endswith('\\') or output_path == '':
+                # Generate default filename
+                if self.last_loaded_file:
+                    default_filename = f"PivotPro_{self.last_loaded_file}.csv"
+                else:
+                    default_filename = "PivotPro_output.csv"
+                
+                if output_path:
+                    # Combine directory path with default filename
+                    output_path = os.path.join(output_path, default_filename)
+                else:
+                    # Use current directory with default filename
+                    output_path = default_filename
+            else:
+                # Check if it's a directory path without trailing slash
+                if os.path.isdir(output_path):
+                    if self.last_loaded_file:
+                        default_filename = f"PivotPro_{self.last_loaded_file}.csv"
+                    else:
+                        default_filename = "PivotPro_output.csv"
+                    output_path = os.path.join(output_path, default_filename)
+                else:
+                    # Add .csv extension if not provided
+                    if not output_path.lower().endswith('.csv'):
+                        output_path += '.csv'
+            
+            # Use 'sep' parameter instead of 'delimiter' for pandas
+            data.to_csv(output_path, sep=delimiter, index=False)
             print(f"✓ Successfully saved: {output_path}")
             return True
         except Exception as e:
@@ -140,7 +254,16 @@ def main():
             
         elif choice == '5':
             if transformer.data is not None:
-                output_path = input("Enter output file path: ").strip()
+                # Suggest default path with filename
+                if transformer.last_loaded_file:
+                    suggested_name = f"PivotPro_{transformer.last_loaded_file}.csv"
+                    print(f"Suggested filename: {suggested_name}")
+                    output_path = input(f"Enter output file path (press Enter for '{suggested_name}'): ").strip()
+                    if not output_path:
+                        output_path = suggested_name
+                else:
+                    output_path = input("Enter output file path: ").strip()
+                
                 delimiter = input("Enter delimiter (default ';'): ").strip() or ';'
                 transformer.save_csv(transformer.data, output_path, delimiter)
             else:
