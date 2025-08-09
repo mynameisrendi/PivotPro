@@ -248,7 +248,7 @@ def main():
     st.markdown("""
     <div style='text-align: center; color: #6b7280; margin-top: 2rem;'>
         <p>🔄 <strong>PivotPro</strong> - Making data transformation simple and fast</p>
-        <p>Built with ❤️ using Streamlit and Pandas</p>
+        <p>Created by <a href="https://github.com/rendinawan">Rendi Gunawan</a></p>
     </div>
     """, unsafe_allow_html=True)
 
