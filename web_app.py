@@ -139,10 +139,10 @@ def main():
                 st.markdown("<div class='success-box'>✅ File uploaded successfully!</div>", unsafe_allow_html=True)
                 
                 # Display file info
+                # - Columns: {', '.join(data.columns.tolist())}
                 st.info(f"""
                 **File Info:**
                 - Shape: {data.shape[0]} rows × {data.shape[1]} columns
-                - Columns: {', '.join(data.columns.tolist())}
                 """)
                 
                 # Preview data
